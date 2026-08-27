@@ -1,0 +1,79 @@
+name: Verify Voyager import
+
+on:
+  push:
+    branches:
+      - feat/import-voyager-skill
+    paths:
+      - .github/workflows/verify-voyager.yml
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/import-voyager-skill
+          fetch-depth: 0
+
+      - name: Verify exact upstream subtree
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone --quiet https://github.com/HanChan831/voyager.git /tmp/voyager-upstream
+          git -C /tmp/voyager-upstream checkout --quiet 38e33e4044a18500d0df99d3ddda1681ef1c8657
+          test "$(find voyager -type f | wc -l | tr -d ' ')" = "21"
+          diff -qr /tmp/voyager-upstream/voyager voyager
+
+      - name: Verify Thailand budget arithmetic
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/thai-trip-data.json <<'EOF'
+          {
+            "trip": {
+              "origin": "Bangkok",
+              "destination": "Krabi",
+              "start_date": "2026-08-27",
+              "travelers": 2,
+              "currency": "THB"
+            },
+            "items": [
+              {"day":1,"category":"長途交通","description":"Bangkok to Krabi overnight bus","amount":749,"per_person":true},
+              {"day":2,"category":"住宿","description":"Private room","amount":600,"per_person":false},
+              {"day":2,"category":"当地交通","description":"Motorbike rental","amount":250,"per_person":false}
+            ]
+          }
+          EOF
+          python3 voyager/budget_calculator.py /tmp/thai-trip-data.json /tmp/budget_summary.md | tee /tmp/budget-stdout.txt
+          grep -F '总预算：2348.00 THB' /tmp/budget-stdout.txt
+          grep -F '人均 1174.00 THB' /tmp/budget-stdout.txt
+          grep -F '总预算：2348.00 THB' /tmp/budget_summary.md
+          grep -F '人均预算：1174.00 THB' /tmp/budget_summary.md
+
+      - name: Verify Python syntax without repo cache files
+        shell: bash
+        env:
+          PYTHONPYCACHEPREFIX: /tmp/voyager-pycache
+        run: |
+          set -euo pipefail
+          python3 -m py_compile \
+            voyager/budget_calculator.py \
+            voyager/geocode_lookup.py \
+            voyager/itinerary_html_builder.py \
+            voyager/photo_lookup.py \
+            voyager/schedule_checker.py
+
+      - name: Verify license attribution and clean tree
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'MIT License' LICENSE
+          grep -F 'Copyright (c) 2026 寒江在下雪' LICENSE
+          grep -F 'HanChan831/voyager' README.md
+          test ! -d voyager/__pycache__
+          git status --short
